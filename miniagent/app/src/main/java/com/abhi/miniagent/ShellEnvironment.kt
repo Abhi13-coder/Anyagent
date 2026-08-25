@@ -45,9 +45,18 @@ class ShellEnvironment(private val context: Context) {
                     if (entry.isDirectory) {
                         outFile.mkdirs()
                     } else if (entry.isSymbolicLink) {
-                        // best-effort: symlinks inside the rootfs are common (busybox applets).
-                        // Java has no portable symlink API pre-NIO-on-Android; skip rather than
-                        // risk a broken partial file. This is a known v0.1-of-phase-2 gap.
+                        // Symlinks inside the rootfs are common (busybox applets - /bin/sh
+                        // itself is one). Android exposes a real symlink syscall via
+                        // android.system.Os since API 21, so create them for real instead
+                        // of skipping - skipping used to leave /bin/sh missing forever,
+                        // which made isSetUp() (and proot's exec of /bin/sh) fail permanently.
+                        outFile.parentFile?.mkdirs()
+                        try {
+                            android.system.Os.symlink(entry.linkName, outFile.absolutePath)
+                        } catch (e: Exception) {
+                            // Ignore individual broken/unsupported symlinks rather than
+                            // aborting the whole extraction over one bad entry.
+                        }
                     } else {
                         outFile.parentFile?.mkdirs()
                         FileOutputStream(outFile).use { out -> tar.copyTo(out) }
@@ -120,4 +129,4 @@ class ShellEnvironment(private val context: Context) {
             return RISKY_PATTERNS.any { lower.contains(it) }
         }
     }
-}
+}        
