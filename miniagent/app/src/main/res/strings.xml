@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">MiniAgent</string>
+    <string name="accessibility_service_description">Lets MiniAgent read visible on-screen text and tap on your behalf when you ask it to. Off by default - enable only if you want the agent to interact with other apps.</string>
+</resources>
