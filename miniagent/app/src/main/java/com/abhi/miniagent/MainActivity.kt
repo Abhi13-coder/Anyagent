@@ -121,7 +121,38 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---- SAF file helpers -------------------------------------------------
+    private var typingPos: Int = -1
+    private var typingHandler: android.os.Handler? = null
+
+    private fun showTyping(label: String) {
+        runOnUiThread {
+            typingPos = chatAdapter.addMessage(ChatMessage("•", ChatRole.ASSISTANT, label = label))
+            scrollToBottom()
+            var dots = 1
+            typingHandler = android.os.Handler(android.os.Looper.getMainLooper())
+            val runnable = object : Runnable {
+                override fun run() {
+                    if (typingPos in 0 until chatAdapter.itemCount) {
+                        chatAdapter.setText(typingPos, "•".repeat(dots))
+                        dots = if (dots >= 3) 1 else dots + 1
+                        typingHandler?.postDelayed(this, 400)
+                    }
+                }
+            }
+            typingHandler?.post(runnable)
+        }
+    }
+
+    private fun hideTyping() {
+        runOnUiThread {
+            typingHandler?.removeCallbacksAndMessages(null)
+            typingHandler = null
+            if (typingPos in 0 until chatAdapter.itemCount) chatAdapter.removeAt(typingPos)
+            typingPos = -1
+        }
+    }
+
+
 
     private fun rootDoc(): DocumentFile? {
         val uri = treeUri ?: return null
@@ -345,8 +376,11 @@ class MainActivity : AppCompatActivity() {
                     .post(body.toString().toRequestBody("application/json".toMediaType()))
                     .build()
 
-                client.newCall(req).execute().use { resp ->
-                    val respStr = resp.body?.string() ?: ""
+                showTyping(provider.label)
+                try {
+                    client.newCall(req).execute().use { resp ->
+                        hideTyping()
+                        val respStr = resp.body?.string() ?: ""
                     if (!resp.isSuccessful) {
                         addSystem("[${provider.label}] API error ${resp.code}: ${respStr.take(500)}")
                         return
@@ -385,6 +419,9 @@ class MainActivity : AppCompatActivity() {
                         addSystem("[${provider.label}] done (or waiting on you - check 'Continue previous conversation' and reply above if it asked something).")
                         return
                     }
+                    }
+                } finally {
+                    hideTyping()
                 }
             }
             addSystem("[${provider.label}] stopped after max iterations (12).")
@@ -393,3 +430,5 @@ class MainActivity : AppCompatActivity() {
         }
     }
 }
+
+                                
