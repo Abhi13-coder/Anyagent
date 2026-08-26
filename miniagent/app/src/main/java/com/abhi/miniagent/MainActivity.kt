@@ -8,10 +8,12 @@ import android.os.Bundle
 import android.view.View
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.abhi.miniagent.databinding.ActivityMainBinding
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -29,6 +31,7 @@ class MainActivity : AppCompatActivity() {
     private var treeUri: Uri? = null
     private lateinit var providerStore: ProviderStore
     private lateinit var shellEnv: ShellEnvironment
+    private lateinit var chatAdapter: ChatAdapter
 
     // Per-provider conversation history, kept in memory so a model's follow-up
     // question can actually be replied to with context (lost on activity kill -
@@ -61,6 +64,10 @@ class MainActivity : AppCompatActivity() {
         providerStore = ProviderStore(this)
         shellEnv = ShellEnvironment(this)
 
+        chatAdapter = ChatAdapter()
+        b.rvChat.layoutManager = LinearLayoutManager(this)
+        b.rvChat.adapter = chatAdapter
+
         getSharedPreferences("miniagent", MODE_PRIVATE).getString("tree_uri", null)?.let {
             treeUri = Uri.parse(it)
             b.tvFolder.text = treeUri?.path ?: it
@@ -70,8 +77,13 @@ class MainActivity : AppCompatActivity() {
         b.btnProviders.setOnClickListener { startActivity(Intent(this, ProvidersActivity::class.java)) }
         b.btnRun.setOnClickListener { runAgent() }
         b.btnSetupShell.setOnClickListener {
-            log("[shell] Setting up (this happens once, ~a few MB download)...")
-            Thread { shellEnv.setup { msg -> log(msg) } }.start()
+            addSystem("[shell] Setting up (this happens once, ~a few MB download)...")
+            Thread { shellEnv.setup { msg -> addSystem(msg) } }.start()
+        }
+        // Attachments (images/files) aren't wired up yet - this is a placeholder so the
+        // button is visible and honest about its state rather than silently doing nothing.
+        b.btnAttach.setOnClickListener {
+            Toast.makeText(this, "Attachments coming soon", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -81,8 +93,32 @@ class MainActivity : AppCompatActivity() {
         b.tvActiveCount.text = "$activeCount active model(s)"
     }
 
-    private fun log(msg: String) {
-        runOnUiThread { b.tvLog.append(msg + "\n\n") }
+    // ---- Chat bubble helpers (replace the old single tvLog.append log) ----
+
+    private fun scrollToBottom() {
+        if (chatAdapter.itemCount > 0) b.rvChat.scrollToPosition(chatAdapter.itemCount - 1)
+    }
+
+    private fun addUser(text: String) {
+        runOnUiThread {
+            chatAdapter.addMessage(ChatMessage(text, ChatRole.USER))
+            scrollToBottom()
+        }
+    }
+
+    private fun addAssistant(label: String, text: String) {
+        runOnUiThread {
+            chatAdapter.addMessage(ChatMessage(text, ChatRole.ASSISTANT, label = label))
+            scrollToBottom()
+        }
+    }
+
+    /** Status/tool/error lines - visually dimmed + monospace so real replies stand out. */
+    private fun addSystem(text: String) {
+        runOnUiThread {
+            chatAdapter.addMessage(ChatMessage(text, ChatRole.SYSTEM))
+            scrollToBottom()
+        }
     }
 
     // ---- SAF file helpers -------------------------------------------------
@@ -166,25 +202,20 @@ class MainActivity : AppCompatActivity() {
         wv.settings.javaScriptEnabled = true
         wv.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
-                val widthPx = resources.displayMetrics.widthPixels
-                val heightPx = 1600
-                view.measure(
-                    View.MeasureSpec.makeMeasureSpec(widthPx, View.MeasureSpec.EXACTLY),
-                    View.MeasureSpec.makeMeasureSpec(heightPx, View.MeasureSpec.EXACTLY)
-                )
-                view.layout(0, 0, widthPx, heightPx)
-                val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                view.draw(canvas)
-                b.ivPreview.setImageBitmap(bitmap)
-                b.ivPreview.visibility = View.VISIBLE
-                log("[preview] screenshot captured below")
+                view.postDelayed({
+                    val bmp = Bitmap.createBitmap(view.width.coerceAtLeast(1), view.height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    view.draw(canvas)
+                    // Preview shows up as its own small system bubble, right after whatever
+                    // triggered it - avoids needing to track which exact tool-result bubble
+                    // to attach to, since write_file's render is fire-and-forget/async.
+                    chatAdapter.addMessage(ChatMessage("", ChatRole.SYSTEM, label = "preview", bitmap = bmp))
+                    scrollToBottom()
+                }, 300)
             }
         }
         wv.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
     }
-
-    // ---- Risk-gated shell confirmation (blocks the background thread, not the UI) ----
 
     private fun confirmRisky(cmd: String): Boolean {
         val queue = ArrayBlockingQueue<Boolean>(1)
@@ -255,16 +286,20 @@ class MainActivity : AppCompatActivity() {
         val providers = providerStore.activeOnes()
         val continueConv = b.cbContinue.isChecked
 
-        if (treeUri == null) { log("Pick a project folder first."); return }
-        if (providers.isEmpty()) { log("No active providers. Tap 'Manage providers & models' and activate at least one."); return }
-        if (task.isEmpty()) { log("Enter a task."); return }
+        if (treeUri == null) { addSystem("Pick a project folder first."); return }
+        if (providers.isEmpty()) { addSystem("No active providers. Tap 'Models' and activate at least one."); return }
+        if (task.isEmpty()) { addSystem("Enter a task."); return }
 
-        if (!continueConv) { b.tvLog.text = ""; b.ivPreview.visibility = View.GONE }
-        log("Task: $task\nRunning on ${providers.size} model(s): ${providers.joinToString { it.label }}")
+        if (!continueConv) { runOnUiThread { chatAdapter.clear() } }
+        addUser(task)
+        b.etTask.setText("")
+        if (providers.size > 1) {
+            addSystem("Running on ${providers.size} model(s): ${providers.joinToString { it.label }}")
+        }
 
         Thread {
             for (provider in providers) {
-                log("========== ${provider.label} (${provider.model}) ==========")
+                if (providers.size > 1) addSystem("========== ${provider.label} (${provider.model}) ==========")
                 runOneProvider(provider, task, continueConv)
             }
         }.start()
@@ -313,7 +348,7 @@ class MainActivity : AppCompatActivity() {
                 client.newCall(req).execute().use { resp ->
                     val respStr = resp.body?.string() ?: ""
                     if (!resp.isSuccessful) {
-                        log("[${provider.label}] API error ${resp.code}: ${respStr.take(500)}")
+                        addSystem("[${provider.label}] API error ${resp.code}: ${respStr.take(500)}")
                         return
                     }
                     val respJson = JSONObject(respStr)
@@ -325,7 +360,7 @@ class MainActivity : AppCompatActivity() {
 
                     if (message.has("content") && !message.isNull("content")) {
                         val text = message.optString("content", "")
-                        if (text.isNotBlank()) log("[${provider.label}] $text")
+                        if (text.isNotBlank()) addAssistant(provider.label, text)
                     }
 
                     val toolCalls = message.optJSONArray("tool_calls")
@@ -337,9 +372,9 @@ class MainActivity : AppCompatActivity() {
                             val fnName = fn.getString("name")
                             val argsStr = fn.optString("arguments", "{}")
                             val args = try { JSONObject(argsStr) } catch (e: Exception) { JSONObject() }
-                            log("[${provider.label}] -> tool: $fnName($args)")
+                            addSystem("-> tool: $fnName($args)")
                             val result = runTool(fnName, args)
-                            log("[${provider.label}] <- result: ${result.take(300)}")
+                            addSystem("<- result: ${result.take(300)}")
                             messages.put(JSONObject().apply {
                                 put("role", "tool")
                                 put("tool_call_id", callId)
@@ -347,14 +382,14 @@ class MainActivity : AppCompatActivity() {
                             })
                         }
                     } else {
-                        log("[${provider.label}] done (or waiting on you - check 'Continue previous conversation' and reply above if it asked something).")
+                        addSystem("[${provider.label}] done (or waiting on you - check 'Continue previous conversation' and reply above if it asked something).")
                         return
                     }
                 }
             }
-            log("[${provider.label}] stopped after max iterations (12).")
+            addSystem("[${provider.label}] stopped after max iterations (12).")
         } catch (e: Exception) {
-            log("[${provider.label}] error: ${e.message}")
+            addSystem("[${provider.label}] error: ${e.message}")
         }
     }
 }
