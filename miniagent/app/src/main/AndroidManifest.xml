@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Attachments: camera capture, mic (voice input - capture only, no STT/TTS wired yet),
+         and reading picked media/files. READ_MEDIA_* is the API 33+ replacement for the
+         legacy READ_EXTERNAL_STORAGE, which is capped at API 32 below. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+    <!-- Floating bubble overlay (experimental - see OverlayBubbleService). This is a
+         special permission: it can't be runtime-requested like the ones above, the user
+         has to grant it via a Settings screen (Settings.canDrawOverlays check + intent). -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <application
+        android:allowBackup="true"
+        android:label="MiniAgent"
+        android:icon="@android:drawable/ic_menu_edit"
+        android:extractNativeLibs="true"
+        android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ProvidersActivity"
+            android:exported="false" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.abhi.miniagent.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- EXPERIMENTAL: full screen-read + tap automation across other apps. This is
+             the same mechanism screen-scraping/accessibility malware abuses, so Play Store
+             requires a strict declared-use justification for it - fine for your own
+             sideloaded build, but treat it with real caution and don't publish it as-is
+             without a proper disclosed-use review. -->
+        <service
+            android:name=".MiniAgentAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <service
+            android:name=".OverlayBubbleService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
+    </application>
+</manifest>
