@@ -16,16 +16,10 @@ enum class ChatRole { USER, ASSISTANT, SYSTEM }
 data class ChatMessage(
     var text: String,
     val role: ChatRole,
-    var label: String? = null,   // e.g. provider label, shown above the bubble text
+    var label: String? = null,
     var bitmap: Bitmap? = null
 )
 
-/**
- * Renders the agent's log as chat bubbles instead of one long monospace TextView.
- * USER = right-aligned purple bubble. ASSISTANT = left-aligned dark bubble, normal text.
- * SYSTEM = left-aligned dark bubble, smaller monospace, dimmed - used for tool calls/results
- * and status lines, so it visually reads as "background noise" next to real replies.
- */
 class ChatAdapter(private val items: MutableList<ChatMessage> = mutableListOf()) :
     RecyclerView.Adapter<ChatAdapter.VH>() {
 
@@ -96,11 +90,22 @@ class ChatAdapter(private val items: MutableList<ChatMessage> = mutableListOf())
         return pos
     }
 
-    /** Appends text to the bubble at [pos] (used for streaming-style incremental updates). */
     fun appendToMessage(pos: Int, extra: String) {
         if (pos !in items.indices) return
         items[pos].text += extra
         notifyItemChanged(pos)
+    }
+
+    fun setText(pos: Int, text: String) {
+        if (pos !in items.indices) return
+        items[pos].text = text
+        notifyItemChanged(pos)
+    }
+
+    fun removeAt(pos: Int) {
+        if (pos !in items.indices) return
+        items.removeAt(pos)
+        notifyItemRemoved(pos)
     }
 
     fun attachImage(pos: Int, bitmap: Bitmap) {
@@ -115,4 +120,3 @@ class ChatAdapter(private val items: MutableList<ChatMessage> = mutableListOf())
         notifyItemRangeRemoved(0, n)
     }
     }
-    
